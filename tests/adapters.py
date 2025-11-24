@@ -8,7 +8,8 @@ import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
-
+from einops import einsum
+from cs336_basics.nn_utils import softmax
 
 def run_linear(
     d_in: int,
@@ -29,7 +30,10 @@ def run_linear(
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
 
-    raise NotImplementedError
+    from cs336_basics.model import 
+    linear = Linear(d_in, d_out)
+    linear.weight.data = weights
+    return linear(in_features)
 
 
 def run_embedding(
@@ -51,7 +55,10 @@ def run_embedding(
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
 
-    raise NotImplementedError
+    from cs336_basics.model import Embedding
+    embedding = Embedding(vocab_size, d_model)
+    embedding.weight.data = weights
+    return embedding(token_ids)
 
 
 def run_swiglu(
@@ -83,7 +90,12 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    from cs336_basics.model import SwiGLU
+    swiglu = SwiGLU(d_model, d_ff)
+    swiglu.w1.weight.data = w1_weight
+    swiglu.w2.weight.data = w2_weight
+    swiglu.w3.weight.data = w3_weight
+    return swiglu(in_features)
 
 
 def run_scaled_dot_product_attention(
@@ -104,7 +116,10 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    from cs336_basics.model import scaled_dot_product_attention
+    
+    return scaled_dot_product_attention(Q, K, V, mask)
+    
 
 
 def run_multihead_self_attention(
@@ -138,7 +153,13 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    from cs336_basics.model import MultiheadSelfAttention
+    multihead_attention = MultiheadSelfAttention(d_model, num_heads)
+    multihead_attention.q_proj.weight.data = q_proj_weight
+    multihead_attention.k_proj.weight.data = k_proj_weight
+    multihead_attention.v_proj.weight.data = v_proj_weight
+    multihead_attention.output_proj.weight.data = o_proj_weight
+    return multihead_attention(in_features)
 
 
 def run_multihead_self_attention_with_rope(
@@ -178,7 +199,14 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    from cs336_basics.model import MultiheadSelfAttention, RotaryPositionalEmbedding
+    rope = RotaryPositionalEmbedding(theta, d_model // num_heads, max_seq_len)
+    multihead_attention = MultiheadSelfAttention(d_model, num_heads, rope, theta)
+    multihead_attention.q_proj.weight.data = q_proj_weight
+    multihead_attention.k_proj.weight.data = k_proj_weight
+    multihead_attention.v_proj.weight.data = v_proj_weight
+    multihead_attention.output_proj.weight.data = o_proj_weight
+    return multihead_attention(in_features)
 
 
 def run_rope(
@@ -200,7 +228,9 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    raise NotImplementedError
+    from cs336_basics.model import RotaryPositionalEmbedding
+    rope = RotaryPositionalEmbedding(theta=theta, d_k=d_k, max_seq_len=max_seq_len, device=in_query_or_key.device)
+    return rope(in_query_or_key, token_positions)
 
 
 def run_transformer_block(
@@ -273,7 +303,20 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    from cs336_basics.model import TransformerBlock, RotaryPositionalEmbedding
+    rope = RotaryPositionalEmbedding(theta, d_model // num_heads, max_seq_len)
+    block = TransformerBlock(d_model, d_ff, num_heads, rope, theta)
+    block.ln1.weight.data = weights["ln1.weight"]
+    block.ln2.weight.data = weights["ln2.weight"]
+    block.sa.q_proj.weight.data = weights["attn.q_proj.weight"]
+    block.sa.k_proj.weight.data = weights["attn.k_proj.weight"]
+    block.sa.v_proj.weight.data = weights["attn.v_proj.weight"]
+    block.sa.output_proj.weight.data = weights["attn.output_proj.weight"]
+    block.ff.w1.weight.data = weights["ffn.w1.weight"]
+    block.ff.w2.weight.data = weights["ffn.w2.weight"]
+    block.ff.w3.weight.data = weights["ffn.w3.weight"]
+    
+    return block(in_features)
 
 
 def run_transformer_lm(
@@ -355,7 +398,25 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    from cs336_basics.model import Transformer_LM, RotaryPositionalEmbedding
+    rope = RotaryPositionalEmbedding(rope_theta, d_model // num_heads, context_length)
+    model = Transformer_LM(vocab_size, context_length, d_model, num_layers, num_heads, d_ff, rope, rope_theta)
+    model.token_embedding.weight.data = weights["token_embeddings.weight"]
+    for i in range(num_layers):
+        model.transformer_blocks[i].ln1.weight.data = weights[f"layers.{i}.ln1.weight"]
+        model.transformer_blocks[i].ln2.weight.data = weights[f"layers.{i}.ln2.weight"]
+        model.transformer_blocks[i].sa.q_proj.weight.data = weights[f"layers.{i}.attn.q_proj.weight"]
+        model.transformer_blocks[i].sa.k_proj.weight.data = weights[f"layers.{i}.attn.k_proj.weight"]
+        model.transformer_blocks[i].sa.v_proj.weight.data = weights[f"layers.{i}.attn.v_proj.weight"]
+        model.transformer_blocks[i].sa.output_proj.weight.data = weights[f"layers.{i}.attn.output_proj.weight"]
+        model.transformer_blocks[i].ff.w1.weight.data = weights[f"layers.{i}.ffn.w1.weight"]
+        model.transformer_blocks[i].ff.w2.weight.data = weights[f"layers.{i}.ffn.w2.weight"]
+        model.transformer_blocks[i].ff.w3.weight.data = weights[f"layers.{i}.ffn.w3.weight"]
+    
+    model.norm.weight.data = weights["ln_final.weight"]
+    model.lm_head.weight.data = weights["lm_head.weight"]
+    
+    return model(in_indices)
 
 
 def run_rmsnorm(
@@ -378,7 +439,11 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    from cs336_basics.model import RMSNorm
+    rmsnorm = RMSNorm(d_model, eps)
+    rmsnorm.weight.data = weights
+    
+    return rmsnorm(in_features)
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
@@ -392,7 +457,7 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    raise NotImplementedError
+    return in_features * torch.sigmoid(in_features)
 
 
 def run_get_batch(
@@ -415,9 +480,19 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    raise NotImplementedError
+    import numpy as np
+    sample_idx = np.random.randint(0, len(dataset) - context_length, size=(batch_size,))
+    print("sample_idx: ", sample_idx)
+    sample_x = np.array([dataset[i : i + context_length] for i in sample_idx])
+    print("sample_x: ", sample_x)
+    sample_y = np.array([dataset[i + 1 : i + context_length + 1] for i in sample_idx])
+    print("sample_y: ", sample_y)
 
-
+    device = torch.device(device)
+    return torch.from_numpy(sample_x).to(device=device), torch.from_numpy(sample_y).to(
+        device=device
+    )
+    
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
     """
     Given a tensor of inputs, return the output of softmaxing the given `dim`
@@ -431,7 +506,7 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-    raise NotImplementedError
+    return softmax(in_features, dim)
 
 
 def run_cross_entropy(
@@ -449,7 +524,8 @@ def run_cross_entropy(
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
-    raise NotImplementedError
+    from cs336_basics.nn_utils import cross_entropy
+    return cross_entropy(inputs, targets)
 
 
 def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
@@ -461,14 +537,16 @@ def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm:
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
-    raise NotImplementedError
+    from cs336_basics.optimizer import gradient_clipping
+    return gradient_clipping(parameters, max_l2_norm)
 
 
 def get_adamw_cls() -> Any:
     """
     Returns a torch.optim.Optimizer that implements AdamW.
     """
-    raise NotImplementedError
+    from cs336_basics.optimizer import AdamW
+    return AdamW
 
 
 def run_get_lr_cosine_schedule(
@@ -496,7 +574,8 @@ def run_get_lr_cosine_schedule(
     Returns:
         Learning rate at the given iteration under the specified schedule.
     """
-    raise NotImplementedError
+    from cs336_basics.optimizer import cosine_learning_rate_schedule
+    return cosine_learning_rate_schedule(it, max_learning_rate, min_learning_rate, warmup_iters, cosine_cycle_iters)
 
 
 def run_save_checkpoint(
@@ -515,7 +594,8 @@ def run_save_checkpoint(
             we've completed.
         out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
     """
-    raise NotImplementedError
+    from cs336_basics.utils import save_checkpoint
+    return save_checkpoint(model, optimizer, iteration, out)
 
 
 def run_load_checkpoint(
@@ -536,7 +616,8 @@ def run_load_checkpoint(
     Returns:
         int: the previously-serialized number of iterations.
     """
-    raise NotImplementedError
+    from cs336_basics.utils import load_checkpoint
+    return load_checkpoint(src, model, optimizer)
 
 
 def get_tokenizer(
@@ -560,6 +641,7 @@ def get_tokenizer(
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
     raise NotImplementedError
+
 
 
 def run_train_bpe(
@@ -589,4 +671,20 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    raise NotImplementedError
+    
+    from cs336_basics.bpe import train_bpe
+    return train_bpe(
+        input_path=input_path,
+        vocab_size=vocab_size,
+        special_tokens=special_tokens,
+        **kwargs,
+    )
+    
+    
+
+    
+    
+    
+    
+    
+    
